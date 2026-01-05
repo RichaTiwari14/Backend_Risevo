@@ -24,7 +24,7 @@ from .permission import IsSuperUser, IsAdminUser, CanCreateAdmin, CanManageEmplo
 from django.db.models.functions import TruncMonth
 from django.db.models import Count
 from calendar import month_abbr
-
+from rest_framework.parsers import MultiPartParser, FormParser
 class AdminLoginAPIView(APIView):
     """
     Login for both Superuser and Admin
@@ -440,6 +440,7 @@ class JobApplicationAPIView(APIView):
     POST -> Public
     GET / DELETE -> Admin + Superuser
     """
+    parser_classes = (MultiPartParser, FormParser)
 
     def get_permissions(self):
         if self.request.method == "POST":
@@ -458,7 +459,11 @@ class JobApplicationAPIView(APIView):
 
     def get(self, request):
         applications = JobApplication.objects.all().order_by("-created_at")
-        serializer = JobApplicationSerializer(applications, many=True)
+        serializer = JobApplicationSerializer(
+            applications,
+            many=True,
+            context={"request": request}
+        )
         return Response(serializer.data)
 
     def delete(self, request, pk):

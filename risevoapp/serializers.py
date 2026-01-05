@@ -89,7 +89,19 @@ class JobApplicationSerializer(serializers.ModelSerializer):
         read_only=True
     )
 
+    resume = serializers.SerializerMethodField()
     class Meta:
         model = JobApplication
         fields = "__all__"
         read_only_fields = ["created_at"]
+
+    def get_resume(self, obj):
+        request = self.context.get("request", None)
+        if obj.resume:
+            if request:
+                return request.build_absolute_uri(obj.resume.url)
+            return obj.resume.url   # fallback relative URL
+        return None
+
+
+
