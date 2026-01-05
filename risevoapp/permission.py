@@ -1,57 +1,63 @@
 from rest_framework.permissions import BasePermission
 
 
-class IsAdminOrSuperUser(BasePermission):
+class IsSuperUser(BasePermission):
     """
-    Admin ya Superuser - Sab kuch access (except Django Admin)
+    Sirf Superuser access - Django Admin + Dashboard dono
     """
-    message = "Sirf admin ya superuser ye action kar sakta hai."
+    message = "Only superuser can access this resource."
 
     def has_permission(self, request, view):
-        return bool(
+        return (
+            request.user and 
+            request.user.is_authenticated and 
+            request.user.is_superuser
+        )
+
+
+class IsAdminUser(BasePermission):
+    """
+    Admin ya Superuser access - Dashboard
+    """
+    message = "Only admin users can access this resource."
+
+    def has_permission(self, request, view):
+        return (
             request.user and 
             request.user.is_authenticated and 
             (request.user.is_admin or request.user.is_superuser)
         )
 
 
-class CanManageAdmin(BasePermission):
+class CanCreateAdmin(BasePermission):
     """
-    Admin CRUD - Admin aur Superuser dono kar sakte hain
+    Sirf Superuser admin create kar sakta hai
     """
-    message = "Admin management ke liye permission chahiye."
+    message = "Only superuser can create admin users."
 
     def has_permission(self, request, view):
-        return bool(
+        if request.method in ['POST']:
+            return (
+                request.user and 
+                request.user.is_authenticated and 
+                request.user.is_superuser
+            )
+        return (
             request.user and 
             request.user.is_authenticated and 
-            request.user.can_manage_admin()
+            (request.user.is_admin or request.user.is_superuser)
         )
 
 
 class CanManageEmployee(BasePermission):
     """
-    Employee CRUD - Admin aur Superuser dono
+    Admin aur Superuser dono employee manage kar sakte hain
     """
-    message = "Employee management ke liye permission chahiye."
+    message = "Only admin users can manage employees."
 
     def has_permission(self, request, view):
-        return bool(
+        return (
             request.user and 
             request.user.is_authenticated and 
-            request.user.can_manage_employee()
-        )
-
-
-class CanManageEnquiry(BasePermission):
-    """
-    Enquiry CRUD - Admin aur Superuser dono
-    """
-    message = "Enquiry management ke liye permission chahiye."
-
-    def has_permission(self, request, view):
-        return bool(
-            request.user and 
-            request.user.is_authenticated and 
-            request.user.can_manage_enquiry()
+            (request.user.is_admin or request.user.is_superuser)
         )
