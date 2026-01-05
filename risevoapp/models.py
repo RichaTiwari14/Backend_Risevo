@@ -125,14 +125,19 @@ class Employee(models.Model):
         return self.name
 
 class Enquiry(models.Model):
-    name       = models.CharField(max_length=100)
-    email      = models.EmailField()
-    company    = models.CharField(max_length=100)
-    service    = models.CharField(max_length=100)
-    created_at = models.DateTimeField(auto_now_add=True)    
+    name = models.CharField(max_length=100)
+    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(max_length=15,null=True, blank=True)
 
+    project_type = models.CharField(max_length=150, blank=True, null=True)
+    location = models.CharField(max_length=150, blank=True, null=True)
 
+    message = models.TextField(blank=True, null=True)
 
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
 
 class Career(models.Model):
     designation = models.CharField(max_length=150)
