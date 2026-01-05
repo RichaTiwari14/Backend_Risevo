@@ -1,37 +1,33 @@
+
 from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+from .models import *
+from .serializers import *
+from django.utils.timezone import now
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from django.utils.timezone import now
 
-from .models import Career, User, Employee, Enquiry , JobApplication
+from .models import User, Employee, Enquiry
 from .serializers import (
     AdminSerializer, 
     EmployeeSerializer, 
     EnquirySerializer,
     LoginSerializer,
-    UserProfileSerializer,
-   CareerSerializer,
-   JobApplicationSerializer  ,   
+    UserProfileSerializer
 )
-from .permission import (
-    IsAdminOrSuperUser,
-    CanManageAdmin,
-    CanManageEmployee,
-    CanManageEnquiry,
-)
+from core.permissions import IsSuperUser, IsAdminUser, CanCreateAdmin, CanManageEmployee
 
 from django.db.models.functions import TruncMonth
 from django.db.models import Count
 from calendar import month_abbr
 
-# ==================== AUTH APIs ====================
-
 class AdminLoginAPIView(APIView):
     """
-    Login API for Admin and Superuser
+    Login for both Superuser and Admin
     """
     permission_classes = [AllowAny]
 
@@ -52,15 +48,16 @@ class AdminLoginAPIView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        if not user.can_access_dashboard():
+        # Check if user is admin or superuser
+        if not (user.is_admin or user.is_superuser):
             return Response(
-                {"error": "Dashboard access permission nahi hai"}, 
+                {"error": "You don't have permission to access dashboard"}, 
                 status=status.HTTP_403_FORBIDDEN
             )
 
         if not user.is_active:
             return Response(
-                {"error": "Account disabled hai"}, 
+                {"error": "Account is disabled"}, 
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -77,123 +74,162 @@ class AdminLoginAPIView(APIView):
                 "role": user.role,
                 "is_superuser": user.is_superuser,
                 "is_admin": user.is_admin,
-                "permissions": {
-                    "can_manage_admin": user.can_manage_admin(),
-                    "can_manage_employee": user.can_manage_employee(),
-                    "can_manage_enquiry": user.can_manage_enquiry(),
-                    "can_access_django_admin": user.can_access_django_admin(),
-                }
+                "can_create_admin": user.can_create_admin(),
+                "can_create_employee": user.can_create_employee(),
             }
         }, status=status.HTTP_200_OK)
 
 
-class LogoutAPIView(APIView):
+class AdminRegisterAPIView(APIView):
+    """
+    Admin CRUD
+    Superuser + Admin dono admin create kar sakte hain
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        try:
-            refresh_token = request.data.get("refresh")
-            if refresh_token:
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-            return Response({"message": "Logout successful"}, status=status.HTTP_200_OK)
-        except Exception:
-            return Response({"message": "Logout successful"}, status=status.HTTP_200_OK)
+        # ✅ Superuser OR Admin allowed
+        if not (request.user.is_superuser or request.user.is_admin):
+            return Response(
+                {"error": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
+        serializer = AdminSerializer(
+            data=request.data,
+            context={"request": request}
+        )
 
-# ==================== ADMIN CRUD APIs ====================
+        if serializer.is_valid():
+            admin = serializer.save()
+            return Response(
+                {
+                    "message": "Admin registered successfully",
+                    "admin": AdminSerializer(admin).data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
-class AdminRegisterAPIView(APIView):
-    """
-    Admin CRUD - Admin aur Superuser DONO kar sakte hain
-    """
-    permission_classes = [IsAuthenticated, CanManageAdmin]
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, pk=None):
-        """Get Admins"""
+        """Get Admins - Admin aur Superuser dono dekh sakte hain"""
         if pk:
             try:
                 admin = User.objects.get(pk=pk, is_admin=True, is_superuser=False)
                 serializer = AdminSerializer(admin)
                 return Response(serializer.data)
             except User.DoesNotExist:
-                return Response({"error": "Admin not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"error": "Admin not found"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
         
-        admins = User.objects.filter(is_admin=True, is_superuser=False).order_by('-created_at')
+        # Sirf admins dikhao, superusers nahi
+        admins = User.objects.filter(is_admin=True, is_superuser=False)
         serializer = AdminSerializer(admins, many=True)
         return Response({
             "count": admins.count(),
             "admins": serializer.data
         })
 
-    def post(self, request):
-        """Create Admin - Admin aur Superuser dono"""
-        serializer = AdminSerializer(data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            admin = serializer.save()
-            return Response({
-                "message": "Admin successfully create ho gaya",
-                "admin": AdminSerializer(admin).data
-            }, status=status.HTTP_201_CREATED)
-            
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     def patch(self, request, pk):
-        """Update Admin"""
+        """Update Admin - Admin aur Superuser dono"""
+        # ✅ Admin ya Superuser check
+        if not (request.user.is_superuser or request.user.is_admin):
+            return Response(
+                {"error": "Only admin or superuser can update admin"}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         try:
             admin = User.objects.get(pk=pk, is_admin=True, is_superuser=False)
+            
+            # ✅ Admin sirf khud ko update kar sakta hai (optional security)
+            # Agar aap chahte ho ki admin sirf apna profile update kare:
+            # if request.user.is_admin and request.user.id != admin.id:
+            #     return Response(
+            #         {"error": "Admin can only update their own profile"}, 
+            #         status=status.HTTP_403_FORBIDDEN
+            #     )
+            
             serializer = AdminSerializer(admin, data=request.data, partial=True)
             
             if serializer.is_valid():
                 serializer.save()
                 return Response({
-                    "message": "Admin successfully update ho gaya",
+                    "message": "Admin updated successfully",
                     "admin": serializer.data
                 })
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
         except User.DoesNotExist:
-            return Response({"error": "Admin not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Admin not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     def delete(self, request, pk):
-        """Delete Admin"""
+        """Delete Admin - Admin aur Superuser dono"""
+        # ✅ Admin ya Superuser check
+        if not (request.user.is_superuser or request.user.is_admin):
+            return Response(
+                {"error": "Only admin or superuser can delete admin"}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             admin = User.objects.get(pk=pk, is_admin=True, is_superuser=False)
             
-            # Admin apne aap ko delete nahi kar sakta
-            if admin.id == request.user.id:
+            # ✅ Admin khud ko delete nahi kar sakta (security)
+            if request.user.id == admin.id:
                 return Response(
-                    {"error": "Aap apne aap ko delete nahi kar sakte"}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "You cannot delete yourself"}, 
+                    status=status.HTTP_403_FORBIDDEN
                 )
             
             admin_email = admin.email
             admin.delete()
             return Response({
-                "message": f"Admin '{admin_email}' successfully delete ho gaya"
+                "message": f"Admin '{admin_email}' deleted successfully"
             }, status=status.HTTP_200_OK)
             
         except User.DoesNotExist:
-            return Response({"error": "Admin not found"}, status=status.HTTP_404_NOT_FOUND)
-
-
-# ==================== EMPLOYEE CRUD APIs ====================
-
+            return Response(
+                {"error": "Admin not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 class EmployeeAPIView(APIView):
     """
-    Employee CRUD - Admin aur Superuser dono
+    Employee CRUD - Admin aur Superuser dono manage kar sakte hain
     """
     permission_classes = [IsAuthenticated, CanManageEmployee]
 
+    def post(self, request):
+        """Create Employee"""
+        serializer = EmployeeSerializer(data=request.data, context={'request': request})
+        
+        if serializer.is_valid():
+            employee = serializer.save()
+            return Response({
+                "message": "Employee created successfully",
+                "employee": EmployeeSerializer(employee).data
+            }, status=status.HTTP_201_CREATED)
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     def get(self, request, pk=None):
+        """Get Employees"""
         if pk:
             try:
                 employee = Employee.objects.get(pk=pk)
                 serializer = EmployeeSerializer(employee)
                 return Response(serializer.data)
             except Employee.DoesNotExist:
-                return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"error": "Employee not found"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
         employees = Employee.objects.all().order_by('-created_at')
         serializer = EmployeeSerializer(employees, many=True)
@@ -202,19 +238,8 @@ class EmployeeAPIView(APIView):
             "employees": serializer.data
         })
 
-    def post(self, request):
-        serializer = EmployeeSerializer(data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            employee = serializer.save()
-            return Response({
-                "message": "Employee successfully create ho gaya",
-                "employee": EmployeeSerializer(employee).data
-            }, status=status.HTTP_201_CREATED)
-            
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     def patch(self, request, pk):
+        """Update Employee"""
         try:
             employee = Employee.objects.get(pk=pk)
             serializer = EmployeeSerializer(employee, data=request.data, partial=True)
@@ -222,88 +247,97 @@ class EmployeeAPIView(APIView):
             if serializer.is_valid():
                 serializer.save()
                 return Response({
-                    "message": "Employee successfully update ho gaya",
+                    "message": "Employee updated successfully",
                     "employee": serializer.data
                 })
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
         except Employee.DoesNotExist:
-            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Employee not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     def delete(self, request, pk):
+        """Delete Employee"""
         try:
             employee = Employee.objects.get(pk=pk)
             employee_name = employee.name
             employee.delete()
             return Response({
-                "message": f"Employee '{employee_name}' successfully delete ho gaya"
+                "message": f"Employee '{employee_name}' deleted successfully"
             }, status=status.HTTP_200_OK)
             
         except Employee.DoesNotExist:
-            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Employee not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
-# ==================== ENQUIRY CRUD APIs ====================
 
-class EnquiryAPIView(APIView):
+
+class UserProfileAPIView(APIView):
     """
-    Enquiry CRUD
-    - POST: Public
-    - GET/PATCH/DELETE: Admin & Superuser
+    Current User Profile
     """
-    
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return [AllowAny()]
-        return [IsAuthenticated(), CanManageEnquiry()]
+    permission_classes = [IsAuthenticated]
 
-    def get(self, request, pk=None):
-        if pk:
-            try:
-                enquiry = Enquiry.objects.get(pk=pk)
-                serializer = EnquirySerializer(enquiry)
-                return Response(serializer.data)
-            except Enquiry.DoesNotExist:
-                return Response({"error": "Enquiry not found"}, status=status.HTTP_404_NOT_FOUND)
+    def get(self, request):
+        serializer = UserProfileSerializer(request.user)
+        return Response(serializer.data)
 
-        enquiries = Enquiry.objects.all().order_by('-created_at')
-        serializer = EnquirySerializer(enquiries, many=True)
-        return Response({
-            "count": enquiries.count(),
-            "enquiries": serializer.data
-        })
-
-    def post(self, request):
-        serializer = EnquirySerializer(data=request.data)
+    def patch(self, request):
+        serializer = UserProfileSerializer(
+            request.user, 
+            data=request.data, 
+            partial=True
+        )
         
         if serializer.is_valid():
             serializer.save()
             return Response({
-                "message": "Enquiry successfully submit ho gayi",
-                "enquiry": serializer.data
-            }, status=status.HTTP_201_CREATED)
-            
+                "message": "Profile updated successfully",
+                "user": serializer.data
+            })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def patch(self, request, pk):
+
+class LogoutAPIView(APIView):
+    """
+    Logout - Blacklist refresh token
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
         try:
-            enquiry = Enquiry.objects.get(pk=pk)
-            serializer = EnquirySerializer(enquiry, data=request.data, partial=True)
+            refresh_token = request.data.get("refresh")
             
-            if serializer.is_valid():
-                enquiry = serializer.save()
-                if request.user.is_authenticated:
-                    enquiry.handled_by = request.user
-                    enquiry.save()
-                    
-                return Response({
-                    "message": "Enquiry successfully update ho gayi",
-                    "enquiry": EnquirySerializer(enquiry).data
-                })
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
             
-        except Enquiry.DoesNotExist:
-            return Response({"error": "Enquiry not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "message": "Logout successful"
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                "message": "Logout successful"
+            }, status=status.HTTP_200_OK)
+
+class EnquiryAPIView(APIView):
+    def post(self, request):
+        serializer = EnquirySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        enquiries = Enquiry.objects.all()
+        serializer = EnquirySerializer(enquiries, many=True)
+        return Response(serializer.data)
 
     def delete(self, request, pk):
         try:
@@ -314,8 +348,6 @@ class EnquiryAPIView(APIView):
             return Response({"error": "Enquiry not found"}, status=status.HTTP_404_NOT_FOUND)     
 
 
-
-# ==================== DASHBOARD & PROFILE ====================
 
 class DashboardAPIView(APIView):
 
@@ -356,7 +388,7 @@ class DashboardAPIView(APIView):
 
     def get(self, request):
         return Response({
-            "total_admin": User.objects.filter(is_admin=True).count(),
+            "total_admin": User.objects.filter(is_admin=True, is_superuser=False).count(),
             "total_employee": Employee.objects.count(),
             "today_enquiry": Enquiry.objects.filter(
                 created_at__date=now().date()
@@ -367,25 +399,6 @@ class DashboardAPIView(APIView):
             "enquiries_by_month": self.get_monthly_chart_data(),
         })
 
-class UserProfileAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        serializer = UserProfileSerializer(request.user)
-        return Response(serializer.data)
-
-    def patch(self, request):
-        serializer = UserProfileSerializer(request.user, data=request.data, partial=True)
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                "message": "Profile successfully update ho gaya",
-                "user": serializer.data
-            })
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-
 class CareerAPIView(APIView):
     """
     GET  -> Public
@@ -395,7 +408,7 @@ class CareerAPIView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsAuthenticated(), IsAdminOrSuperUser()]
+        return [IsAuthenticated(), IsAdminUser()]
 
     def get(self, request):
         careers = Career.objects.filter(is_active=True)
@@ -431,7 +444,7 @@ class JobApplicationAPIView(APIView):
     def get_permissions(self):
         if self.request.method == "POST":
             return [AllowAny()]
-        return [IsAuthenticated(), IsAdminOrSuperUser()]
+        return [IsAuthenticated(), IsAdminUser()]
 
     def post(self, request):
         serializer = JobApplicationSerializer(data=request.data)
