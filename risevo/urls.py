@@ -41,4 +41,12 @@ urlpatterns = [
 
     # Dashboard
     path('api/dashboard/', DashboardAPIView.as_view()),
+
+    # Career
+    path("api/career/", CareerAPIView.as_view()),
+    path("api/career/<int:pk>/", CareerAPIView.as_view()),
+
+# Job Apply
+    path("api/job-apply/", JobApplicationAPIView.as_view()),
+    path("api/job-apply/<int:pk>/", JobApplicationAPIView.as_view()),
 ]
