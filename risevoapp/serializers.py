@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from core.models import User, Employee, Enquiry , Career, JobApplication
+from .models import User, Employee, Enquiry , Career, JobApplication
 
 class AdminSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
