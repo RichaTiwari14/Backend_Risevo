@@ -19,7 +19,7 @@ from .serializers import (
     LoginSerializer,
     UserProfileSerializer
 )
-from core.permissions import IsSuperUser, IsAdminUser, CanCreateAdmin, CanManageEmployee
+from .permission import IsSuperUser, IsAdminUser, CanCreateAdmin, CanManageEmployee
 
 from django.db.models.functions import TruncMonth
 from django.db.models import Count
