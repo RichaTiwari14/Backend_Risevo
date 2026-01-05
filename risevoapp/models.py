@@ -130,3 +130,35 @@ class Enquiry(models.Model):
     company    = models.CharField(max_length=100)
     service    = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)    
+
+
+
+
+class Career(models.Model):
+    designation = models.CharField(max_length=150)
+    location = models.CharField(max_length=150)
+    experience = models.CharField(max_length=100)
+    responsibilities = models.TextField()
+    qualification = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.designation
+
+
+class JobApplication(models.Model):
+    career = models.ForeignKey(
+        Career,
+        on_delete=models.CASCADE,
+        related_name="applications"
+    )
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    contact_no = models.CharField(max_length=15)
+    cover_letter = models.TextField()
+    resume = models.FileField(upload_to="resumes/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.career.designation}"
