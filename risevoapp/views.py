@@ -21,6 +21,9 @@ from .serializers import (
 )
 from risevoapp.permission import IsSuperUser, IsAdminUser, CanCreateAdmin, CanManageEmployee
 
+from django.db.models.functions import TruncMonth
+from django.db.models import Count
+from calendar import month_abbr
 
 class AdminLoginAPIView(APIView):
     """
@@ -320,12 +323,52 @@ class EnquiryAPIView(APIView):
             return Response({"error": "Enquiry not found"}, status=status.HTTP_404_NOT_FOUND)     
 
 
-
 class DashboardAPIView(APIView):
+
+    def get_monthly_chart_data(self):
+        # --- Enquiry count grouped by month ---
+        enquiry_qs = (
+            Enquiry.objects
+            .annotate(month=TruncMonth("created_at"))
+            .values("month")
+            .annotate(enquiries=Count("id"))
+            .order_by("month")
+        )
+
+        # --- Employee count grouped by month ---
+        employee_qs = (
+            Employee.objects
+            .annotate(month=TruncMonth("created_at"))
+            .values("month")
+            .annotate(employees=Count("id"))
+            .order_by("month")
+        )
+
+        enquiries_map = {r["month"]: r["enquiries"] for r in enquiry_qs}
+        employees_map = {r["month"]: r["employees"] for r in employee_qs}
+
+        months = sorted(set(enquiries_map.keys()) | set(employees_map.keys()))
+
+        data = []
+        for m in months:
+            data.append({
+                "month": month_abbr[m.month],          # Jan / Feb / Mar
+                "employees": employees_map.get(m, 0),
+                "enquiries": enquiries_map.get(m, 0),
+            })
+
+        return data
+
+
     def get(self, request):
         return Response({
             "total_admin": User.objects.filter(is_admin=True).count(),
             "total_employee": Employee.objects.count(),
-            "today_enquiry": Enquiry.objects.filter(created_at__date=now().date()).count(),
-            "total_enquiry": Enquiry.objects.count()
-        })               
+            "today_enquiry": Enquiry.objects.filter(
+                created_at__date=now().date()
+            ).count(),
+            "total_enquiry": Enquiry.objects.count(),
+
+            # 🔹 Monthly chart data (FE chart uses this)
+            "enquiries_by_month": self.get_monthly_chart_data(),
+        })
